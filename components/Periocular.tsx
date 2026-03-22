@@ -93,7 +93,7 @@ export default function Periocular() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   
-  const [appState, setAppState] = useState<'intro' | 'main'>('intro')
+  const [appState, setAppState] = useState<'splash' | 'intro' | 'main'>('splash')
   const [userName, setUserName] = useState('')
   const [nameInput, setNameInput] = useState('')
 
@@ -414,29 +414,50 @@ export default function Periocular() {
   // ----------------------------------------------------
   // INTRO SCREEN Render
   // ----------------------------------------------------
-  if (appState === 'intro') {
+  if (appState === 'splash' || appState === 'intro') {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] bg-gray-900 rounded-xl p-8 border border-gray-700 shadow-2xl">
-        <h2 className="text-3xl font-bold text-white mb-2">Welcome to Periocular</h2>
-        <p className="text-gray-400 mb-8">Please identify yourself to proceed.</p>
-        <form onSubmit={handleStart} className="flex flex-col gap-4 w-full max-w-sm">
-          <input 
-            type="text" 
-            placeholder="Enter your name"
-            value={nameInput}
-            onChange={(e) => setNameInput(e.target.value)}
-            className="px-4 py-3 rounded-md bg-gray-800 border border-gray-600 focus:border-blue-500 focus:outline-none text-white text-lg"
-            maxLength={30}
-            autoFocus
-          />
-          <button 
-            type="submit" 
-            disabled={!nameInput.trim()}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 px-4 rounded-md transition-colors"
-          >
-            Start Scan
-          </button>
-        </form>
+      <div className="relative flex flex-col items-center justify-center min-h-[60vh] bg-gray-900 rounded-xl p-8 border border-gray-700 shadow-2xl overflow-hidden">
+        
+        {/* Animated Logo & Title */}
+        <div 
+          onClick={() => { if(appState === 'splash') setAppState('intro') }}
+          className={`absolute inset-0 w-full h-full z-10 flex flex-col items-center justify-center transition-transform duration-700 ease-in-out cursor-pointer ${
+            appState === 'splash' 
+              ? 'translate-y-0 scale-110' 
+              : '-translate-y-24 scale-75 pointer-events-none'
+          }`}
+        >
+          <img src="/logo.png" alt="Genoview Logo" className="w-40 h-40 object-contain drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
+          <h1 className="text-4xl font-extrabold mt-4 tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500">
+            GENOVIEW
+          </h1>
+          {appState === 'splash' && <p className="text-sm text-gray-400 mt-6 animate-pulse">Click anywhere to begin</p>}
+        </div>
+
+        {/* Name Input Form */}
+        <div className={`w-full max-w-sm flex flex-col items-center transition-all duration-700 delay-300 ease-in-out z-20 pt-32 ${
+          appState === 'intro' ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8 pointer-events-none absolute'
+        }`}>
+          <p className="text-gray-400 mb-4 text-center">Please identify yourself to proceed.</p>
+          <form onSubmit={handleStart} className="flex flex-col gap-4 w-full">
+            <input 
+              type="text" 
+              placeholder="Enter your name"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              className="px-4 py-3 rounded-md bg-gray-800 border border-gray-600 focus:border-blue-500 focus:outline-none text-white text-lg text-center"
+              maxLength={30}
+              autoFocus={appState === 'intro'}
+            />
+            <button 
+              type="submit" 
+              disabled={!nameInput.trim()}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 px-4 rounded-md transition-colors"
+            >
+              Start Registration
+            </button>
+          </form>
+        </div>
       </div>
     )
   }
