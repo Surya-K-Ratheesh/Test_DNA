@@ -92,23 +92,27 @@ function computeEmbedding(landmarks: any) {
 export default function Periocular() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  
+  const [appState, setAppState] = useState<'intro' | 'main'>('intro')
+  const [userName, setUserName] = useState('')
+  const [nameInput, setNameInput] = useState('')
+
   const [status, setStatus] = useState('Idle')
-  const [mode, setMode] = useState<'scan' | 'register'>('scan')
+  const [mode, setMode] = useState<'scan' | 'register' | 'database'>('scan')
   const [liveData, setLiveData] = useState<{leftColor: number[], rightColor: number[]}>({leftColor: [0,0,0], rightColor: [0,0,0]})
   const [profiles, setProfiles] = useState<Profile[]>(() => {
     try {
       const raw = localStorage.getItem('peri_profiles')
       if (!raw) return []
       const parsed = JSON.parse(raw)
-      // normalize older profiles that used `embedding` -> convert to `embeddings`
       if (Array.isArray(parsed)) {
         return parsed.map((p: any) => {
           if (!p) return null
           const name = p.name || 'unknown'
           const skinRGB = p.skinRGB || p.skin || [128, 128, 128]
-          if (p.embeddings && Array.isArray(p.embeddings)) return { name, embeddings: p.embeddings, skinRGB }
-          if (p.embedding && Array.isArray(p.embedding)) return { name, embeddings: [p.embedding], skinRGB }
-          return { name, embeddings: [], skinRGB }
+          if (p.embeddings && Array.isArray(p.embeddings)) return { name, embeddings: p.embeddings, skinRGB, eyeColorRGB: p.eyeColorRGB }
+          if (p.embedding && Array.isArray(p.embedding)) return { name, embeddings: [p.embedding], skinRGB, eyeColorRGB: p.eyeColorRGB }
+          return { name, embeddings: [], skinRGB, eyeColorRGB: p.eyeColorRGB }
         }).filter(Boolean) as Profile[]
       }
       return []
@@ -129,6 +133,11 @@ export default function Periocular() {
   useEffect(() => {
     let faceapi: any = null
     let running = true
+
+    // ONLY start the camera if we are in the main app, and NOT viewing the database
+    if (appState !== 'main' || mode === 'database') {
+       return () => { running = false }
+    }
 
     async function setupCamera() {
       setStatus('Requesting Camera')
@@ -238,7 +247,7 @@ export default function Periocular() {
               rightColor: getEyeColor(lm.getRightEye())
             })
             // store a single-frame registration (we capture several frames in UI flow)
-          } else {
+          } else if (mode === 'scan') {
             // scanning: compare to stored profiles
             if (profiles.length > 0) {
               let best: { name: string; score: number; dist: number; skinDiff: number } | null = null
@@ -292,9 +301,9 @@ export default function Periocular() {
         stream.getTracks().forEach(t => t.stop());
       }
     }
-  }, [mode, profiles])
+  }, [appState, mode, profiles])
 
-  // registration handler: capture 6 frames and average embedding
+  // registration handler: capture sequence of frames and average metadata
   async function handleRegister() {
     const name = prompt('Enter name for this profile')?.trim()
     if (!name) return
@@ -321,53 +330,53 @@ export default function Periocular() {
           canvas.height = video.videoHeight || 480
           const ctx = canvas.getContext('2d')!
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-        const pts = det.landmarks.getLeftEye().concat(det.landmarks.getRightEye())
-        const xs = pts.map((p: any) => p.x)
-        const ys = pts.map((p: any) => p.y)
-        const minX = Math.max(0, Math.floor(Math.min(...xs) - 10))
-        const minY = Math.max(0, Math.floor(Math.min(...ys) - 10))
-        const w = Math.min(80, Math.max(20, Math.floor(Math.max(...xs) - minX)))
-        const h = Math.min(60, Math.max(20, Math.floor(Math.max(...ys) - minY)))
-        try {
-          const img = ctx.getImageData(minX, minY, w, h)
-          let r = 0, g = 0, b = 0
-          for (let k = 0; k < img.data.length; k += 4) { r += img.data[k]; g += img.data[k + 1]; b += img.data[k + 2] }
-          const n = img.data.length / 4 || 1
-          skinSamples.push([Math.round(r / n), Math.round(g / n), Math.round(b / n)])
-          
-          const getEyeColor = (pts: any[]) => {
-              const xs2 = pts.map((p: any) => p.x)
-              const ys2 = pts.map((p: any) => p.y)
-              const minX2 = Math.min(...xs2), maxX2 = Math.max(...xs2), minY2 = Math.min(...ys2), maxY2 = Math.max(...ys2)
-              const w2 = Math.max(1, maxX2 - minX2), h2 = Math.max(1, maxY2 - minY2)
-              try {
-                const eyeImg = ctx.getImageData(Math.max(0, Math.floor(minX2)), Math.max(0, Math.floor(minY2)), Math.floor(w2), Math.floor(h2))
-                let rc=0, gc=0, bc=0
-                for(let i=0; i<eyeImg.data.length; i+=4) { rc += eyeImg.data[i]; gc += eyeImg.data[i+1]; bc += eyeImg.data[i+2] }
-                const ne = eyeImg.data.length / 4 || 1
-                return [Math.round(rc/ne), Math.round(gc/ne), Math.round(bc/ne)]
-              } catch { return [0,0,0] }
+          const pts = det.landmarks.getLeftEye().concat(det.landmarks.getRightEye())
+          const xs = pts.map((p: any) => p.x)
+          const ys = pts.map((p: any) => p.y)
+          const minX = Math.max(0, Math.floor(Math.min(...xs) - 10))
+          const minY = Math.max(0, Math.floor(Math.min(...ys) - 10))
+          const w = Math.min(80, Math.max(20, Math.floor(Math.max(...xs) - minX)))
+          const h = Math.min(60, Math.max(20, Math.floor(Math.max(...ys) - minY)))
+          try {
+            const img = ctx.getImageData(minX, minY, w, h)
+            let r = 0, g = 0, b = 0
+            for (let k = 0; k < img.data.length; k += 4) { r += img.data[k]; g += img.data[k + 1]; b += img.data[k + 2] }
+            const n = img.data.length / 4 || 1
+            skinSamples.push([Math.round(r / n), Math.round(g / n), Math.round(b / n)])
+            
+            const getEyeColor = (pts: any[]) => {
+                const xs2 = pts.map((p: any) => p.x)
+                const ys2 = pts.map((p: any) => p.y)
+                const minX2 = Math.min(...xs2), maxX2 = Math.max(...xs2), minY2 = Math.min(...ys2), maxY2 = Math.max(...ys2)
+                const w2 = Math.max(1, maxX2 - minX2), h2 = Math.max(1, maxY2 - minY2)
+                try {
+                  const eyeImg = ctx.getImageData(Math.max(0, Math.floor(minX2)), Math.max(0, Math.floor(minY2)), Math.floor(w2), Math.floor(h2))
+                  let rc=0, gc=0, bc=0
+                  for(let i=0; i<eyeImg.data.length; i+=4) { rc += eyeImg.data[i]; gc += eyeImg.data[i+1]; bc += eyeImg.data[i+2] }
+                  const ne = eyeImg.data.length / 4 || 1
+                  return [Math.round(rc/ne), Math.round(gc/ne), Math.round(bc/ne)]
+                } catch { return [0,0,0] }
+            }
+            const lc = getEyeColor(det.landmarks.getLeftEye())
+            const rc = getEyeColor(det.landmarks.getRightEye())
+            eyeColorSamples.push([
+               Math.round((lc[0] + rc[0])/2),
+               Math.round((lc[1] + rc[1])/2),
+               Math.round((lc[2] + rc[2])/2)
+            ])
+          } catch {
+            skinSamples.push([128, 128, 128])
+            eyeColorSamples.push([0, 0, 0])
           }
-          const lc = getEyeColor(det.landmarks.getLeftEye())
-          const rc = getEyeColor(det.landmarks.getRightEye())
-          eyeColorSamples.push([
-             Math.round((lc[0] + rc[0])/2),
-             Math.round((lc[1] + rc[1])/2),
-             Math.round((lc[2] + rc[2])/2)
-          ])
-
-        } catch {
-          skinSamples.push([128, 128, 128])
-          eyeColorSamples.push([0, 0, 0])
-        }
         }
       } catch (e) {
         console.error('Frame capture error:', e)
       }
       await new Promise((r) => setTimeout(r, 250))
     }
+    
     if (captures.length === 0) { setStatus('No faces captured'); return }
-    // store the set of embeddings (do not collapse to a single averaged vector)
+    
     const avgSkin = [0, 0, 0]
     for (const s of skinSamples) { avgSkin[0] += s[0]; avgSkin[1] += s[1]; avgSkin[2] += s[2] }
     avgSkin[0] = Math.round(avgSkin[0] / Math.max(1, skinSamples.length))
@@ -382,7 +391,7 @@ export default function Periocular() {
 
     const newProfile: Profile = { name: name!, embeddings: captures, skinRGB: avgSkin, eyeColorRGB: avgEyeColor }
     const updated = [...profiles, newProfile]
-    // update state and persist immediately to avoid relying solely on effect
+    
     try {
       setProfiles(updated)
       localStorage.setItem('peri_profiles', JSON.stringify(updated))
@@ -394,56 +403,179 @@ export default function Periocular() {
     }
   }
 
+  const handleStart = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (nameInput.trim().length > 0) {
+      setUserName(nameInput.trim())
+      setAppState('main')
+    }
+  }
+
+  // ----------------------------------------------------
+  // INTRO SCREEN Render
+  // ----------------------------------------------------
+  if (appState === 'intro') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] bg-gray-900 rounded-xl p-8 border border-gray-700 shadow-2xl">
+        <h2 className="text-3xl font-bold text-white mb-2">Welcome to Periocular</h2>
+        <p className="text-gray-400 mb-8">Please identify yourself to proceed.</p>
+        <form onSubmit={handleStart} className="flex flex-col gap-4 w-full max-w-sm">
+          <input 
+            type="text" 
+            placeholder="Enter your name"
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            className="px-4 py-3 rounded-md bg-gray-800 border border-gray-600 focus:border-blue-500 focus:outline-none text-white text-lg"
+            maxLength={30}
+            autoFocus
+          />
+          <button 
+            type="submit" 
+            disabled={!nameInput.trim()}
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 px-4 rounded-md transition-colors"
+          >
+            Start Scan
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  // ----------------------------------------------------
+  // MAIN APP Render
+  // ----------------------------------------------------
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div className="bg-gray-900 rounded p-2 flex flex-col items-center">
-        <div className="relative" style={{ width: '100%', maxWidth: 480, aspectRatio: '4/3' }}>
-            <video ref={videoRef} className="rounded w-full h-full object-cover" muted playsInline autoPlay />
-            <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
-          </div>
-        <div className="mt-3 w-full flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button onClick={() => setMode('register')} className={`px-3 py-1 rounded ${mode === 'register' ? 'bg-green-600' : 'bg-gray-700'}`}>Registration Mode</button>
-            <button onClick={() => setMode('scan')} className={`px-3 py-1 rounded ${mode === 'scan' ? 'bg-blue-600' : 'bg-gray-700'}`}>Scan Mode</button>
-          </div>
-          <div className="flex flex-col items-end">
-             <div className="status-chip bg-gray-800 text-gray-200">{status}</div>
-             {mode === 'register' && (
-                <div className="text-xs text-gray-300 mt-1 flex gap-2">
-                    <span>L-Eye: <div className="inline-block w-3 h-3 rounded" style={{ backgroundColor: `rgb(${liveData.leftColor.join(',')})`}}></div></span>
-                    <span>R-Eye: <div className="inline-block w-3 h-3 rounded" style={{ backgroundColor: `rgb(${liveData.rightColor.join(',')})`}}></div></span>
-                </div>
-             )}
-          </div>
+    <div className="flex flex-col gap-4 rounded-xl">
+      {/* HEADER / NAVIGATION */}
+      <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Hello, {userName}!</h2>
+          <p className="text-sm text-gray-400">Select an operational mode</p>
         </div>
-        <div className="mt-3 w-full flex gap-2">
-          <button onClick={handleRegister} className="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded px-3 py-2">Register Profile</button>
-          <button onClick={() => { localStorage.removeItem('peri_profiles'); setProfiles([]) }} className="bg-red-600 hover:bg-red-500 rounded px-3 py-2">Clear Profiles</button>
+        
+        <div className="flex bg-gray-900 p-1 rounded-lg gap-1 border border-gray-700 w-full sm:w-auto overflow-x-auto">
+          <button 
+            onClick={() => setMode('register')} 
+            className={`flex-1 sm:flex-none px-4 py-2 rounded-md font-medium transition-colors whitespace-nowrap ${mode === 'register' ? 'bg-green-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+          >
+            Register Profile
+          </button>
+          <button 
+            onClick={() => setMode('scan')} 
+            className={`flex-1 sm:flex-none px-4 py-2 rounded-md font-medium transition-colors whitespace-nowrap ${mode === 'scan' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+          >
+            Scan Face
+          </button>
+          <button 
+            onClick={() => setMode('database')} 
+            className={`flex-1 sm:flex-none px-4 py-2 rounded-md font-medium transition-colors whitespace-nowrap ${mode === 'database' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
+          >
+            Database
+          </button>
         </div>
       </div>
 
-      <div className="bg-gray-800 rounded p-4">
-        <h2 className="text-lg font-medium mb-2">Profiles</h2>
-        <div className="space-y-2 max-h-96 overflow-auto pr-2">
-          {profiles.length === 0 && <div className="text-sm text-gray-400">No profiles registered yet.</div>}
-          {profiles.map((p, i) => (
-            <div key={i} className="flex items-center justify-between bg-gray-700 p-2 rounded">
-              <div>
-                <div className="font-semibold">{p.name}</div>
-                <div className="text-xs text-gray-300 flex items-center gap-1">Skin: <div className="w-2 h-2 rounded-full" style={{backgroundColor: `rgb(${p.skinRGB.join(',')})`}}></div></div>
-                {p.eyeColorRGB && (
-                  <div className="text-xs text-gray-300 flex items-center gap-1">
-                    Eyes: 
-                    <div className="w-2 h-2 rounded-full border border-gray-500" style={{backgroundColor: `rgb(${p.eyeColorRGB.join(',')})`}}></div>
-                    <span className="font-mono ml-1">{getEyeColorName(p.eyeColorRGB)}</span>
-                  </div>
-                )}
-              </div>
-              <button onClick={() => setProfiles((arr) => arr.filter((_, idx) => idx !== i))} className="text-sm bg-red-600 px-2 py-1 rounded">Delete</button>
+      {/* DYNAMIC CONTENT AREA */}
+      {(mode === 'scan' || mode === 'register') ? (
+        <div className="bg-gray-900 rounded-xl p-4 border border-gray-700 shadow-xl flex flex-col items-center max-w-2xl mx-auto w-full">
+          <div className="relative w-full rounded-lg overflow-hidden border-2 border-gray-800" style={{ maxWidth: 640, aspectRatio: '4/3' }}>
+            <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover bg-black" muted playsInline autoPlay />
+            <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
+            
+            <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md border border-gray-600 px-3 py-1.5 rounded-full flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full animate-pulse ${mode === 'register' ? 'bg-green-400' : 'bg-blue-400'}`}></span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-gray-200">
+                {status}
+              </span>
             </div>
-          ))}
+            
+            {mode === 'register' && (
+              <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur-md border border-gray-600 px-3 py-2 rounded-lg flex flex-col gap-1 text-xs text-gray-300">
+                <div className="flex items-center gap-2">
+                   <span>L-Eye:</span>
+                   <div className="w-3 h-3 rounded shadow-inner" style={{ backgroundColor: `rgb(${liveData.leftColor.join(',')})`}}></div>
+                </div>
+                <div className="flex items-center gap-2">
+                   <span>R-Eye:</span>
+                   <div className="w-3 h-3 rounded shadow-inner" style={{ backgroundColor: `rgb(${liveData.rightColor.join(',')})`}}></div>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {mode === 'register' && (
+            <div className="mt-4 w-full">
+              <button 
+                onClick={handleRegister} 
+                className="w-full bg-green-600 hover:bg-green-500 active:bg-green-700 text-white font-bold py-3 rounded-lg shadow-lg transition-transform active:scale-[0.98]"
+              >
+                Snap to Register
+              </button>
+            </div>
+          )}
         </div>
-      </div>
+      ) : (
+        <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl w-full">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <div>
+               <h2 className="text-xl font-bold text-white">Registration Database</h2>
+               <p className="text-gray-400 text-sm">Review all identified individuals and their tracked features.</p>
+            </div>
+            <button 
+              onClick={() => { if(confirm('Are you sure you want to clear all data?')) { localStorage.removeItem('peri_profiles'); setProfiles([]); } }} 
+              className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-md shadow transition-colors"
+            >
+              Clear Database
+            </button>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-max overflow-y-auto max-h-[60vh] pr-2 custom-scrollbar">
+            {profiles.length === 0 && (
+              <div className="col-span-full py-12 text-center text-gray-500 border-2 border-dashed border-gray-700 rounded-xl">
+                <svg className="mx-auto h-12 w-12 text-gray-600 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                </svg>
+                <p>No profiles found. Switch back to Register Mode.</p>
+              </div>
+            )}
+            {profiles.map((p, i) => (
+              <div key={i} className="bg-gray-900 border border-gray-700 rounded-lg p-4 flex flex-col justify-between hover:border-gray-500 transition-colors group">
+                <div>
+                  <div className="flex justify-between items-start mb-2">
+                     <h3 className="font-bold text-lg text-white truncate pr-2">{p.name}</h3>
+                     <span className="text-xs bg-gray-800 px-2 py-1 rounded-full text-gray-400 shrink-0">ID: {i + 1}</span>
+                  </div>
+                  
+                  <div className="space-y-2 mt-4">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-400">Skin Tone</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-md shadow-sm border border-gray-600" style={{backgroundColor: `rgb(${p.skinRGB.join(',')})`}}></div>
+                      </div>
+                    </div>
+                    {p.eyeColorRGB && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-400">Eye Color</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-gray-300 text-xs">{getEyeColorName(p.eyeColorRGB)}</span>
+                          <div className="w-5 h-5 rounded-full shadow-sm border border-gray-600" style={{backgroundColor: `rgb(${p.eyeColorRGB.join(',')})`}}></div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => setProfiles((arr) => arr.filter((_, idx) => idx !== i))} 
+                  className="mt-6 w-full py-2 text-sm text-red-500 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-md transition-colors opacity-0 group-hover:opacity-100"
+                >
+                  Delete Profile
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

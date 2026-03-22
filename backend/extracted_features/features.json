@@ -1,0 +1,10 @@
+{
+    "success": true,
+    "left_eyebrow_saved_at": "extracted_features\\left_eyebrow.jpg",
+    "right_eyebrow_saved_at": "extracted_features\\right_eyebrow.jpg",
+    "left_eye_saved_at": "extracted_features\\left_eye.jpg",
+    "right_eye_saved_at": "extracted_features\\right_eye.jpg",
+    "eye_color_left": "#8395b5",
+    "eye_color_right": "#33405d",
+    "eye_color": "#8395b5"
+}
