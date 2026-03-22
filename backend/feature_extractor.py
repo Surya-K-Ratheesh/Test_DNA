@@ -5,6 +5,8 @@ import urllib.request
 import mediapipe as mp  # type: ignore
 from mediapipe.tasks import python  # type: ignore
 from mediapipe.tasks.python import vision  # type: ignore
+from sklearn.cluster import KMeans
+import json
 
 # 1. Download the required model file automatically if it doesn't exist
 MODEL_PATH = 'face_landmarker.task'
@@ -72,9 +74,37 @@ def process_image(image_bytes, output_directory):
     def get_dominant_color(img_crop):
         if img_crop is None or img_crop.size == 0:
             return "#000000"
-        avg_color_per_row = np.average(img_crop, axis=0)
-        avg_color = np.average(avg_color_per_row, axis=0) # [B, G, R]
-        b, g, r = int(avg_color[0]), int(avg_color[1]), int(avg_color[2])
+            
+        # Reshape the image to be a list of pixels
+        pixels = img_crop.reshape(-1, 3)
+        
+        # Filter out very dark pixels (often pupil/eyelashes) and very bright pixels (sclera/glare)
+        # RGB distance from black (0,0,0) and white (255,255,255)
+        filtered_pixels = []
+        for p in pixels:
+            # MediaPipe image is RGB, so p is [R, G, B]
+            r, g, b = p
+            lum = 0.299 * r + 0.587 * g + 0.114 * b
+            # Ignore pixels that are too dark (pupil) or too bright (sclera/skin)
+            if 20 < lum < 220:
+                filtered_pixels.append(p)
+                
+        if len(filtered_pixels) < 10:
+            # Fallback to simple average if not enough interesting pixels
+            filtered_pixels = pixels
+
+        filtered_pixels = np.array(filtered_pixels)
+        
+        # We group pixels into 2 clusters (e.g. iris color vs skin/shadow) and pick the most common one
+        kmeans = KMeans(n_clusters=2, n_init='auto', random_state=42)
+        kmeans.fit(filtered_pixels)
+        
+        # Find which cluster has more pixels
+        labels, counts = np.unique(kmeans.labels_, return_counts=True)
+        dominant_cluster = labels[np.argmax(counts)]
+        dominant_rgb = kmeans.cluster_centers_[dominant_cluster]
+        
+        r, g, b = int(dominant_rgb[0]), int(dominant_rgb[1]), int(dominant_rgb[2])
         return f"#{r:02x}{g:02x}{b:02x}"
 
     # Process and crop the Left Eyebrow
@@ -102,7 +132,8 @@ def process_image(image_bytes, output_directory):
     cv2.imwrite(right_eye_path, right_eye_img)
     r_color = get_dominant_color(right_eye_img)
 
-    return {
+    # We use the left eye color as the primary 'eye_color', but both are saved
+    result_data = {
         "success": True,
         "left_eyebrow_saved_at": left_path,
         "right_eyebrow_saved_at": right_path,
@@ -112,3 +143,10 @@ def process_image(image_bytes, output_directory):
         "eye_color_right": r_color,
         "eye_color": l_color
     }
+
+    # Save to a JSON file
+    json_path = os.path.join(output_directory, "features.json")
+    with open(json_path, "w") as f:
+        json.dump(result_data, f, indent=4)
+
+    return result_data

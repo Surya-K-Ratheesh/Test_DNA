@@ -4,6 +4,27 @@ import React, { useRef, useEffect, useState } from 'react'
 
 type Profile = { name: string; embeddings: number[][]; skinRGB: number[]; eyeColorRGB?: number[] }
 
+function getEyeColorName(rgb: number[]) {
+  const [r, g, b] = rgb;
+  const colors = [
+    { name: 'Brown', rgb: [101, 67, 33] },
+    { name: 'Dark Brown', rgb: [60, 40, 20] },
+    { name: 'Blue', rgb: [70, 130, 180] },
+    { name: 'Light Blue', rgb: [135, 206, 235] },
+    { name: 'Green', rgb: [34, 139, 34] },
+    { name: 'Hazel', rgb: [142, 118, 24] },
+    { name: 'Gray', rgb: [128, 128, 128] },
+    { name: 'Black', rgb: [20, 20, 20] }
+  ];
+  let minDist = Infinity;
+  let closest = 'Unknown';
+  for (const c of colors) {
+    const dist = Math.hypot(r - c.rgb[0], g - c.rgb[1], b - c.rgb[2]);
+    if (dist < minDist) { minDist = dist; closest = c.name; }
+  }
+  return closest;
+}
+
 function computeEmbedding(landmarks: any) {
   // Build a richer periocular embedding:
   // - distances between consecutive eye points
@@ -264,7 +285,13 @@ export default function Periocular() {
       setStatus('Error: ' + (e.message || e))
     })
 
-    return () => { running = false }
+    return () => { 
+      running = false;
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(t => t.stop());
+      }
+    }
   }, [mode, profiles])
 
   // registration handler: capture 6 frames and average embedding
@@ -404,7 +431,13 @@ export default function Periocular() {
               <div>
                 <div className="font-semibold">{p.name}</div>
                 <div className="text-xs text-gray-300 flex items-center gap-1">Skin: <div className="w-2 h-2 rounded-full" style={{backgroundColor: `rgb(${p.skinRGB.join(',')})`}}></div></div>
-                {p.eyeColorRGB && <div className="text-xs text-gray-300 flex items-center gap-1">Eyes: <div className="w-2 h-2 rounded-full" style={{backgroundColor: `rgb(${p.eyeColorRGB.join(',')})`}}></div></div>}
+                {p.eyeColorRGB && (
+                  <div className="text-xs text-gray-300 flex items-center gap-1">
+                    Eyes: 
+                    <div className="w-2 h-2 rounded-full border border-gray-500" style={{backgroundColor: `rgb(${p.eyeColorRGB.join(',')})`}}></div>
+                    <span className="font-mono ml-1">{getEyeColorName(p.eyeColorRGB)}</span>
+                  </div>
+                )}
               </div>
               <button onClick={() => setProfiles((arr) => arr.filter((_, idx) => idx !== i))} className="text-sm bg-red-600 px-2 py-1 rounded">Delete</button>
             </div>

@@ -9,6 +9,7 @@ const nextConfig = {
             crypto: false,
             path: false,
             os: false,
+            encoding: false,
         };
     }
     return config;
